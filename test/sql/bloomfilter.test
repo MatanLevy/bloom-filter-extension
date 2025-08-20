@@ -1,0 +1,23 @@
+# name: test/sql/bloomfilter.test
+# description: test bloomfilter extension
+# group: [sql]
+
+# Before we load the extension, this will fail
+statement error
+SELECT bloomfilter('Sam');
+----
+Catalog Error: Scalar Function with name bloomfilter does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require bloomfilter
+
+# Confirm the extension works
+query I
+SELECT bloomfilter('Sam');
+----
+Bloomfilter Sam 🐥
+
+query I
+SELECT bloomfilter_openssl_version('Michael') ILIKE 'Bloomfilter Michael, my linked OpenSSL version is OpenSSL%';
+----
+true
