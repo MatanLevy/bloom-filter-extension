@@ -343,12 +343,12 @@ inline void BloomfilterOpenSSLVersionScalarFun(DataChunk &args, ExpressionState 
 // =======================
 static void LoadInternal(DatabaseInstance &instance) {
 	// calc m/k
-	ExtensionUtil::RegisterFunction(instance, ScalarFunction("bloom_calc_m", {LogicalType::BIGINT, LogicalType::DOUBLE}, LogicalType::INTEGER, BloomCalcM));
-	ExtensionUtil::RegisterFunction(instance, ScalarFunction("bloom_calc_k", {LogicalType::INTEGER, LogicalType::BIGINT, LogicalType::DOUBLE}, LogicalType::INTEGER, BloomCalcK));
+	ExtensionUtil::RegisterFunction(instance, ScalarFunction("bloom_bits_required", {LogicalType::BIGINT, LogicalType::DOUBLE}, LogicalType::INTEGER, BloomCalcM));
+	ExtensionUtil::RegisterFunction(instance, ScalarFunction("bloom_optimal_hashes", {LogicalType::INTEGER, LogicalType::BIGINT, LogicalType::DOUBLE}, LogicalType::INTEGER, BloomCalcK));
 
 	// probe
 	ExtensionUtil::RegisterFunction(instance, ScalarFunction(
-		"bloom_maybe_contains",
+		"bloom_might_contain",
 		{LogicalType::BLOB, LogicalType::INTEGER, LogicalType::INTEGER, LogicalType::BIGINT, LogicalType::ANY},
 		LogicalType::BOOLEAN,
 		BloomMaybeContains
@@ -356,7 +356,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 	// aggregate: value:any, m:int, k:int, seed:bigint -> blob (no bind)
 	AggregateFunction bloom_build(
-		"bloom_build_agg",
+		"bloom_build_bytes_agg",
 		{ LogicalType::ANY, LogicalType::INTEGER, LogicalType::INTEGER, LogicalType::BIGINT },
 		LogicalType::BLOB,
 		/* state_size */ [](const AggregateFunction &) -> idx_t { return sizeof(BloomAggState); },
