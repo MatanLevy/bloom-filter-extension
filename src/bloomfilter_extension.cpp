@@ -1,16 +1,18 @@
-#define DUCKDB_EXTENSION_MAIN
+// bloomfilter_extension.cpp — updated for DuckDB v1.4+
+//
+// Requires: src/include/bloomfilter_extension.hpp declares
+//   void Load(duckdb::ExtensionLoader &loader) override;
 
 #include "bloomfilter_extension.hpp"
 #include "duckdb.hpp"
 
-// core includes that exist in the template-repo
+// core includes from template
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/aggregate_function.hpp"
-#include "duckdb/main/extension_util.hpp"
-#include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include "duckdb/main/extension.hpp" // ExtensionLoader, DatabaseInstance
 
 // (leftover from template; harmless even if not used)
 #include <openssl/opensslv.h>
@@ -260,7 +262,7 @@ static void BloomAggUpdate(Vector inputs[], AggregateInputData &, idx_t input_co
 		const idx_t vi = vuf.sel->get_index(i);
 		if (!vuf.validity.RowIsValid(vi)) continue; // skip NULL value
 
-		// grab a Value (generic ANY) and hash it
+		// hash the value
 		Value v = val_vec.GetValue(i);
 		uint64_t h1, h2;
 		HashFromValue(v, (uint64_t)st.seed, h1, h2);
@@ -305,7 +307,7 @@ static void BloomAggCombine(Vector &source, Vector &target, AggregateInputData &
 	}
 }
 
-// finalize(Vector &states, AggregateInputData &, Vector &result, idx_t count, idx_t offset)
+// finalize(Vector &states, AggregateInputData &, Vector &result, idx_t count, idx_t /*offset*/)
 static void BloomAggFinalize(Vector &state_vector, AggregateInputData &, Vector &result, idx_t count, idx_t /*offset*/) {
 	auto states = FlatVector::GetData<data_ptr_t>(state_vector);
 	auto out = FlatVector::GetData<string_t>(result);
@@ -339,20 +341,28 @@ inline void BloomfilterOpenSSLVersionScalarFun(DataChunk &args, ExpressionState 
 }
 
 // =======================
-// Registration
+// Registration (via ExtensionLoader)
 // =======================
-static void LoadInternal(DatabaseInstance &instance) {
+static void LoadInternal(ExtensionLoader &loader) {
 	// calc m/k
-	ExtensionUtil::RegisterFunction(instance, ScalarFunction("bloom_bits_required", {LogicalType::BIGINT, LogicalType::DOUBLE}, LogicalType::INTEGER, BloomCalcM));
-	ExtensionUtil::RegisterFunction(instance, ScalarFunction("bloom_optimal_hashes", {LogicalType::INTEGER, LogicalType::BIGINT, LogicalType::DOUBLE}, LogicalType::INTEGER, BloomCalcK));
+	loader.RegisterFunction(ScalarFunction(
+		"bloom_bits_required",
+		{LogicalType::BIGINT, LogicalType::DOUBLE},
+		LogicalType::INTEGER,
+		BloomCalcM));
+
+	loader.RegisterFunction(ScalarFunction(
+		"bloom_optimal_hashes",
+		{LogicalType::INTEGER, LogicalType::BIGINT, LogicalType::DOUBLE},
+		LogicalType::INTEGER,
+		BloomCalcK));
 
 	// probe
-	ExtensionUtil::RegisterFunction(instance, ScalarFunction(
+	loader.RegisterFunction(ScalarFunction(
 		"bloom_might_contain",
 		{LogicalType::BLOB, LogicalType::INTEGER, LogicalType::INTEGER, LogicalType::BIGINT, LogicalType::ANY},
 		LogicalType::BOOLEAN,
-		BloomMaybeContains
-	));
+		BloomMaybeContains));
 
 	// aggregate: value:any, m:int, k:int, seed:bigint -> blob (no bind)
 	AggregateFunction bloom_build(
@@ -367,15 +377,18 @@ static void LoadInternal(DatabaseInstance &instance) {
 		/* null_handling */ FunctionNullHandling::DEFAULT_NULL_HANDLING
 	);
 	bloom_build.destructor = BloomAggDestroy;
-
-	ExtensionUtil::RegisterFunction(instance, bloom_build);
+	loader.RegisterFunction(bloom_build);
 
 	// template demos
-	ExtensionUtil::RegisterFunction(instance, ScalarFunction("bloomfilter", {LogicalType::VARCHAR}, LogicalType::VARCHAR, BloomfilterScalarFun));
-	ExtensionUtil::RegisterFunction(instance, ScalarFunction("bloomfilter_openssl_version", {LogicalType::VARCHAR}, LogicalType::VARCHAR, BloomfilterOpenSSLVersionScalarFun));
+	loader.RegisterFunction(ScalarFunction("bloomfilter",
+		{LogicalType::VARCHAR}, LogicalType::VARCHAR, BloomfilterScalarFun));
+	loader.RegisterFunction(ScalarFunction("bloomfilter_openssl_version",
+		{LogicalType::VARCHAR}, LogicalType::VARCHAR, BloomfilterOpenSSLVersionScalarFun));
 }
 
-void BloomfilterExtension::Load(DuckDB &db) { LoadInternal(*db.instance); }
+void BloomfilterExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
+}
 std::string BloomfilterExtension::Name() { return "bloomfilter"; }
 
 std::string BloomfilterExtension::Version() const {
@@ -388,19 +401,12 @@ std::string BloomfilterExtension::Version() const {
 
 } // namespace duckdb
 
+// ---- Loadable extension entrypoint for DuckDB >= 1.4 ----
+// (DuckDB's build system expects this exact symbol name)
 extern "C" {
 
-DUCKDB_EXTENSION_API void bloomfilter_init(duckdb::DatabaseInstance &db) {
-	duckdb::DuckDB db_wrapper(db);
-	db_wrapper.LoadExtension<duckdb::BloomfilterExtension>();
+DUCKDB_EXTENSION_API void bloomfilter_duckdb_cpp_init(duckdb::ExtensionLoader &loader) {
+	duckdb::LoadInternal(loader);
 }
 
-DUCKDB_EXTENSION_API const char *bloomfilter_version() {
-	return duckdb::DuckDB::LibraryVersion();
-}
-
-}
-
-#ifndef DUCKDB_EXTENSION_MAIN
-#error DUCKDB_EXTENSION_MAIN not defined
-#endif
+} // extern "C"
